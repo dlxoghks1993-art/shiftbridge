@@ -1,0 +1,10 @@
+{
+  "site": "Plant A",
+  "line": "Packaging Line 2",
+  "severity": "P1",
+  "issue": "Temperature exceeded the approved operating range and the affected batch has been isolated.",
+  "action_taken": "The outgoing operator stopped the line, isolated the batch, and recorded the excursion.",
+  "next_action": "Own the investigation, verify the affected batch disposition, and confirm whether the line can safely restart.",
+  "deadline": "before the planned 07:00 restart",
+  "recipient_phone": "+15551234567"
+}
