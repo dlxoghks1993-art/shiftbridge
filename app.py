@@ -1,4 +1,4 @@
-"""ShiftBridge Call Escalator — CALL-E hackathon MVP."""
+"""ShiftBridge Handover Assurance — CALL-E hackathon MVP."""
 from __future__ import annotations
 
 import argparse
@@ -136,6 +136,23 @@ def _needs_escalation(result: dict[str, Any]) -> bool:
     )
 
 
+def _handover_disposition(result: dict[str, Any], *, chain_exhausted: bool = False) -> str:
+    """Map conversation evidence to a deterministic host-workflow state."""
+    structured = result.get("structured_result") or {}
+    if (
+        structured.get("reached_person") == "yes"
+        and structured.get("understood_issue") == "yes"
+        and structured.get("ownership") == "accepted"
+        and structured.get("escalation_required") is not True
+    ):
+        return "accepted"
+    if chain_exhausted:
+        return "needs_supervisor"
+    if structured.get("reached_person") == "no":
+        return "unreached"
+    return "blocked"
+
+
 def run_incident(i: Incident) -> dict[str, Any]:
     api_key = os.environ.get("CALLE_API_KEY")
     if not api_key:
@@ -152,17 +169,19 @@ def run_incident(i: Incident) -> dict[str, Any]:
 
     final = attempts[-1]
     exhausted = _needs_escalation(final) and len(attempts) == len(phones)
+    disposition = _handover_disposition(final, chain_exhausted=exhausted)
     return {
         "incident": asdict(i),
         "attempts": attempts,
-        "handoff_closed": not _needs_escalation(final),
+        "handoff_closed": disposition == "accepted",
+        "handover_disposition": disposition,
         "escalation_chain_exhausted": exhausted,
-        "final_owner_phone": final["phone"] if not _needs_escalation(final) else None,
+        "final_owner_phone": final["phone"] if disposition == "accepted" else None,
     }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Escalate a shift handover incident by phone")
+    parser = argparse.ArgumentParser(description="Verify a shift handover by phone")
     parser.add_argument("incident", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
