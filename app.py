@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 from calle import CalleClient
+
 
 @dataclass
 class Incident:
@@ -18,19 +19,44 @@ class Incident:
     next_action: str
     deadline: str
     recipient_phone: str
+    escalation_phones: list[str] | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "Incident":
-        required = set(cls.__dataclass_fields__)
+        required = {
+            "site",
+            "line",
+            "severity",
+            "issue",
+            "action_taken",
+            "next_action",
+            "deadline",
+            "recipient_phone",
+        }
         missing = sorted(required - raw.keys())
         if missing:
             raise ValueError(f"Missing incident fields: {', '.join(missing)}")
-        incident = cls(**{key: str(raw[key]).strip() for key in required})
+        escalation_phones = raw.get("escalation_phones") or []
+        if not isinstance(escalation_phones, list):
+            raise ValueError("escalation_phones must be a list")
+        incident = cls(
+            site=str(raw["site"]).strip(),
+            line=str(raw["line"]).strip(),
+            severity=str(raw["severity"]).strip(),
+            issue=str(raw["issue"]).strip(),
+            action_taken=str(raw["action_taken"]).strip(),
+            next_action=str(raw["next_action"]).strip(),
+            deadline=str(raw["deadline"]).strip(),
+            recipient_phone=str(raw["recipient_phone"]).strip(),
+            escalation_phones=[str(v).strip() for v in escalation_phones],
+        )
         if incident.severity.upper() not in {"P1", "P2", "P3"}:
             raise ValueError("severity must be P1, P2, or P3")
-        if not incident.recipient_phone.startswith("+"):
-            raise ValueError("recipient_phone must use E.164 format")
+        for phone in [incident.recipient_phone, *(incident.escalation_phones or [])]:
+            if not phone.startswith("+"):
+                raise ValueError("all phone numbers must use E.164 format")
         return incident
+
 
 def build_call_task(i: Incident) -> str:
     return (
@@ -39,8 +65,10 @@ def build_call_task(i: Incident) -> str:
         f"Action already taken: {i.action_taken}. Required next action: {i.next_action}. Deadline: {i.deadline}. "
         "Verify that the responsible person understands the issue, ask whether they accept ownership, "
         "capture their ETA or blocker, and determine whether a human supervisor needs escalation. "
-        "Do not invent facts or commitments. If ownership is declined, mark escalation_required=true."
+        "Do not invent facts or commitments. If the person cannot be reached, does not understand the issue, "
+        "or declines ownership, mark escalation_required=true."
     )
+
 
 RESULT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -50,24 +78,58 @@ RESULT_SCHEMA: dict[str, Any] = {
         "understood_issue": {"type": "string", "enum": ["yes", "no", "unknown"]},
         "ownership": {"type": "string", "enum": ["accepted", "declined", "unknown"]},
         "eta_or_blocker": {"type": "string"},
-        "escalation_required": {"type": "boolean"}
-    }
+        "escalation_required": {"type": "boolean"},
+    },
 }
+
+
+def _call_once(client: CalleClient, i: Incident) -> dict[str, Any]:
+    call = client.calls.create_and_wait(task=build_call_task(i), result_schema=RESULT_SCHEMA)
+    return {
+        "phone": i.recipient_phone,
+        "status": call.get("status"),
+        "task_completed": call.get("task_completed"),
+        "completion_confidence": call.get("completion_confidence"),
+        "structured_result": call.get("structured_result") or {},
+        "evidence": call.get("evidence"),
+    }
+
+
+def _needs_escalation(result: dict[str, Any]) -> bool:
+    structured = result.get("structured_result") or {}
+    if structured.get("escalation_required") is True:
+        return True
+    return not (
+        structured.get("reached_person") == "yes"
+        and structured.get("understood_issue") == "yes"
+        and structured.get("ownership") == "accepted"
+    )
+
 
 def run_incident(i: Incident) -> dict[str, Any]:
     api_key = os.environ.get("CALLE_API_KEY")
     if not api_key:
         raise RuntimeError("CALLE_API_KEY is not set")
     client = CalleClient(api_key=api_key)
-    call = client.calls.create_and_wait(task=build_call_task(i), result_schema=RESULT_SCHEMA)
+    attempts: list[dict[str, Any]] = []
+    phones = [i.recipient_phone, *(i.escalation_phones or [])]
+
+    for phone in phones:
+        attempt = _call_once(client, replace(i, recipient_phone=phone, escalation_phones=[]))
+        attempts.append(attempt)
+        if not _needs_escalation(attempt):
+            break
+
+    final = attempts[-1]
+    exhausted = _needs_escalation(final) and len(attempts) == len(phones)
     return {
         "incident": asdict(i),
-        "status": call.get("status"),
-        "task_completed": call.get("task_completed"),
-        "completion_confidence": call.get("completion_confidence"),
-        "structured_result": call.get("structured_result"),
-        "evidence": call.get("evidence")
+        "attempts": attempts,
+        "handoff_closed": not _needs_escalation(final),
+        "escalation_chain_exhausted": exhausted,
+        "final_owner_phone": final["phone"] if not _needs_escalation(final) else None,
     }
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Escalate a shift handover incident by phone")
@@ -76,9 +138,23 @@ def main() -> None:
     args = parser.parse_args()
     incident = Incident.from_dict(json.loads(args.incident.read_text(encoding="utf-8")))
     if args.dry_run:
-        print(json.dumps({"incident": asdict(incident), "task": build_call_task(incident), "result_schema": RESULT_SCHEMA}, indent=2))
+        phones = [incident.recipient_phone, *(incident.escalation_phones or [])]
+        print(
+            json.dumps(
+                {
+                    "incident": asdict(incident),
+                    "planned_calls": [
+                        build_call_task(replace(incident, recipient_phone=phone, escalation_phones=[]))
+                        for phone in phones
+                    ],
+                    "result_schema": RESULT_SCHEMA,
+                },
+                indent=2,
+            )
+        )
         return
     print(json.dumps(run_incident(incident), indent=2, ensure_ascii=False, default=str))
+
 
 if __name__ == "__main__":
     main()
