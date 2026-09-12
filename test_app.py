@@ -1,6 +1,7 @@
 import unittest
+from types import SimpleNamespace
 
-from app import Incident, RESULT_SCHEMA, _needs_escalation, build_call_task
+from app import Incident, RESULT_SCHEMA, _needs_escalation, _read_call_field, build_call_task
 
 
 class ShiftBridgeTests(unittest.TestCase):
@@ -51,8 +52,16 @@ class ShiftBridgeTests(unittest.TestCase):
         task = build_call_task(Incident.from_dict(self.payload))
         self.assertIn("Temperature excursion detected", task)
         self.assertIn("accept ownership", task)
+        self.assertIn("automated ShiftBridge assistant", task)
         self.assertIn("Do not invent facts or commitments", task)
         self.assertIn("escalation_required=true", task)
+
+    def test_call_field_supports_mapping_and_sdk_object_shapes(self):
+        self.assertEqual(_read_call_field({"status": "completed"}, "status"), "completed")
+        response = SimpleNamespace(status="completed", structured_result={"ownership": "accepted"})
+        self.assertEqual(_read_call_field(response, "status"), "completed")
+        self.assertEqual(_read_call_field(response, "structured_result"), {"ownership": "accepted"})
+        self.assertIsNone(_read_call_field(response, "missing"))
 
     def test_closed_handoff_does_not_escalate(self):
         result = {
@@ -80,6 +89,7 @@ class ShiftBridgeTests(unittest.TestCase):
 
     def test_result_schema_requires_judge_visible_outcomes(self):
         required = set(RESULT_SCHEMA["required"])
+        self.assertFalse(RESULT_SCHEMA["additionalProperties"])
         self.assertEqual(
             required,
             {
