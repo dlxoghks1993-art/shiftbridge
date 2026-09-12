@@ -1,23 +1,26 @@
-# ShiftBridge Call Escalator
+# ShiftBridge Handover Assurance
 
-ShiftBridge turns a shift-handover incident into a real outbound escalation call, then returns machine-readable evidence about acknowledgement, ownership, blockers, and whether a supervisor must be involved.
+ShiftBridge turns a **shift-to-shift operational handover** into a real CALL-E phone conversation and returns structured evidence about what the incoming owner actually heard, accepted, and still needs to resolve.
 
 ## Why this exists
 
-Critical shift handovers often fail at the last mile: a note is written, but nobody proves that the next responsible person actually received it, understood it, and accepted ownership. ShiftBridge closes that gap by using CALL-E as the phone execution layer.
+Factories, facilities, warehouses, field-service teams, and other 24/7 operations routinely transfer unfinished work across shift boundaries. A logbook entry, ticket, or chat message proves that information was written down — not that the incoming owner understood the exact unresolved condition, accepted the next action, or surfaced a blocker before the outgoing shift disappears.
+
+ShiftBridge treats the phone call as a **handover checkpoint**, not a generic incident page. It is designed around the outgoing-to-incoming shift transition: unresolved work, actions already taken, the required next action, a deadline, and explicit read-back/ownership evidence.
 
 ## What the agent does
 
-1. Accepts a structured incident (`site`, `line`, severity, issue, actions already taken, required next action, deadline, recipient phone).
-2. Calls the responsible person through CALL-E.
-3. Clearly identifies itself as an automated operational handover assistant.
-4. Confirms that the person understands the incident.
-5. Asks whether they accept ownership and captures an ETA or blocker.
-6. Returns structured fields plus CALL-E evidence so downstream systems can decide whether to escalate further.
+1. Accepts a structured handover packet (`site`, `line`, severity, unresolved issue, actions already taken, required next action, deadline, incoming owner phone).
+2. Builds a bounded call task from only those supplied facts.
+3. Calls the incoming owner through CALL-E.
+4. Clearly identifies itself as an automated operational handover assistant.
+5. Confirms that the recipient understands the unresolved condition and required next action.
+6. Asks whether they accept ownership and captures an ETA or blocker.
+7. Returns structured fields so the host workflow can mark the handover `accepted`, `blocked`, `unreached`, or `needs_supervisor`.
 
 ## Demo scenario
 
-A night shift discovers a temperature excursion on Packaging Line 2. The operator has already stopped the line and isolated the affected batch. The incoming supervisor must acknowledge the event, accept ownership of the investigation, and give an ETA before the restart deadline.
+A night shift finds a temperature excursion on Packaging Line 2. The operator stops the line and isolates the affected batch, but the investigation cannot finish before shift change. ShiftBridge phones the incoming supervisor with the exact known facts, asks for acknowledgement of the unresolved condition and next action, and records either an ownership/ETA response or a blocker requiring supervisor follow-up.
 
 `examples/p1_temperature_excursion.json` contains a ready-to-edit payload for this scenario.
 
@@ -48,14 +51,28 @@ ShiftBridge requests these fields from CALL-E:
 }
 ```
 
+The host system can translate that into a handover disposition without letting the model invent operational decisions.
+
+## How this differs from a normal incident-escalation pager
+
+The CALL-E community already has an `incident-escalation-call` pattern for waking an on-call engineer and walking an escalation ladder. ShiftBridge deliberately targets a different operational moment:
+
+- **ShiftBridge starts with an outgoing shift's unfinished work**, not a monitoring page.
+- The primary recipient is the **known incoming owner**, not a dynamically resolved on-call ladder.
+- The payload includes **actions already taken + required next action + deadline**, so the call is a continuity check rather than just an alert.
+- The useful output is a **handover disposition** (`accepted`, `blocked`, `unreached`, `needs_supervisor`) that a shift log, CMMS, or production workflow can store.
+- A future escalation tree is secondary; the core product is proving that responsibility crossed the shift boundary with the right context intact.
+
 ## Hackathon positioning
 
-**Core idea:** AI agents usually stop at sending messages. ShiftBridge crosses into the physical world and proves the handoff by speaking to the responsible human.
+**Specific phone-work problem:** unfinished operational work crosses a shift boundary, but the outgoing team cannot tell whether the next owner actually absorbed the context before they leave.
 
-**CALL-E is essential, not decorative:** the product value is the completed phone escalation and the structured evidence returned from the conversation.
+**Why a phone call is necessary:** the workflow needs a live acknowledgement and an opportunity for the incoming owner to surface a blocker immediately. A sent notification cannot provide that state transition.
 
-**Useful beyond factories:** the same workflow can handle facilities incidents, logistics delays, field-service escalation, overnight IT operations, and healthcare-adjacent administrative handoffs where a human acknowledgement is required.
+**CALL-E is essential, not decorative:** the core artifact is the structured result of a real conversation. Without CALL-E, ShiftBridge collapses back into another ticket or notification.
+
+**Reusable direction:** manufacturing shift changes are the demo, but the same handover contract applies to facilities rounds, warehouse exceptions, field-service continuity, overnight operations, and other staffed 24/7 environments.
 
 ## Safety / scope
 
-This prototype does not make safety-critical decisions on behalf of humans. It relays supplied incident facts, collects acknowledgement and ownership status, and flags when a human supervisor should be involved. It is designed to avoid inventing facts or commitments.
+This prototype does not decide whether equipment is safe, restart machinery, approve maintenance, or make emergency decisions. It relays supplied handover facts, collects acknowledgement/ownership evidence, and flags when an authorized human needs to take the next step. It is designed to avoid inventing incident facts or commitments.
