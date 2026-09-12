@@ -1,11 +1,13 @@
 """ShiftBridge Call Escalator — CALL-E hackathon MVP."""
 from __future__ import annotations
+
 import argparse
 import json
 import os
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
+
 from calle import CalleClient
 
 
@@ -61,37 +63,65 @@ class Incident:
 def build_call_task(i: Incident) -> str:
     return (
         f"You are ShiftBridge, an automated operational handover assistant. Call {i.recipient_phone}. "
+        "At the start of the call, clearly identify yourself as an automated ShiftBridge assistant. "
         f"Report a {i.severity.upper()} issue at site {i.site}, line {i.line}: {i.issue}. "
         f"Action already taken: {i.action_taken}. Required next action: {i.next_action}. Deadline: {i.deadline}. "
         "Verify that the responsible person understands the issue, ask whether they accept ownership, "
         "capture their ETA or blocker, and determine whether a human supervisor needs escalation. "
-        "Do not invent facts or commitments. If the person cannot be reached, does not understand the issue, "
+        "Do not invent facts or commitments. Do not claim the incident is resolved unless the called person "
+        "explicitly accepts ownership. If the person cannot be reached, does not understand the issue, "
         "or declines ownership, mark escalation_required=true."
     )
 
 
 RESULT_SCHEMA: dict[str, Any] = {
     "type": "object",
+    "additionalProperties": False,
     "required": ["reached_person", "understood_issue", "ownership", "eta_or_blocker", "escalation_required"],
     "properties": {
-        "reached_person": {"type": "string", "enum": ["yes", "no", "unknown"]},
-        "understood_issue": {"type": "string", "enum": ["yes", "no", "unknown"]},
-        "ownership": {"type": "string", "enum": ["accepted", "declined", "unknown"]},
-        "eta_or_blocker": {"type": "string"},
-        "escalation_required": {"type": "boolean"},
+        "reached_person": {
+            "type": "string",
+            "enum": ["yes", "no", "unknown"],
+            "description": "Whether a responsible human was actually reached on the call.",
+        },
+        "understood_issue": {
+            "type": "string",
+            "enum": ["yes", "no", "unknown"],
+            "description": "Whether the called person explicitly demonstrated understanding of the incident.",
+        },
+        "ownership": {
+            "type": "string",
+            "enum": ["accepted", "declined", "unknown"],
+            "description": "Whether the called person explicitly accepted responsibility for the next action.",
+        },
+        "eta_or_blocker": {
+            "type": "string",
+            "description": "The person's stated ETA, or the blocker preventing ownership/completion.",
+        },
+        "escalation_required": {
+            "type": "boolean",
+            "description": "True when another human must be called because the handoff is not safely closed.",
+        },
     },
 }
+
+
+def _read_call_field(call: Any, name: str, default: Any = None) -> Any:
+    """Support CALL-E SDK responses represented as either mappings or objects."""
+    if isinstance(call, dict):
+        return call.get(name, default)
+    return getattr(call, name, default)
 
 
 def _call_once(client: CalleClient, i: Incident) -> dict[str, Any]:
     call = client.calls.create_and_wait(task=build_call_task(i), result_schema=RESULT_SCHEMA)
     return {
         "phone": i.recipient_phone,
-        "status": call.get("status"),
-        "task_completed": call.get("task_completed"),
-        "completion_confidence": call.get("completion_confidence"),
-        "structured_result": call.get("structured_result") or {},
-        "evidence": call.get("evidence"),
+        "status": _read_call_field(call, "status"),
+        "task_completed": _read_call_field(call, "task_completed"),
+        "completion_confidence": _read_call_field(call, "completion_confidence"),
+        "structured_result": _read_call_field(call, "structured_result") or {},
+        "evidence": _read_call_field(call, "evidence"),
     }
 
 
