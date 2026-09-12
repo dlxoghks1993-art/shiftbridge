@@ -1,7 +1,14 @@
 import unittest
 from types import SimpleNamespace
 
-from app import Incident, RESULT_SCHEMA, _needs_escalation, _read_call_field, build_call_task
+from app import (
+    Incident,
+    RESULT_SCHEMA,
+    _handover_disposition,
+    _needs_escalation,
+    _read_call_field,
+    build_call_task,
+)
 
 
 class ShiftBridgeTests(unittest.TestCase):
@@ -74,6 +81,7 @@ class ShiftBridgeTests(unittest.TestCase):
             }
         }
         self.assertFalse(_needs_escalation(result))
+        self.assertEqual(_handover_disposition(result), "accepted")
 
     def test_declined_ownership_escalates(self):
         result = {
@@ -86,6 +94,31 @@ class ShiftBridgeTests(unittest.TestCase):
             }
         }
         self.assertTrue(_needs_escalation(result))
+        self.assertEqual(_handover_disposition(result), "blocked")
+
+    def test_unreached_maps_to_unreached_before_chain_exhaustion(self):
+        result = {
+            "structured_result": {
+                "reached_person": "no",
+                "understood_issue": "unknown",
+                "ownership": "unknown",
+                "eta_or_blocker": "No answer",
+                "escalation_required": True,
+            }
+        }
+        self.assertEqual(_handover_disposition(result), "unreached")
+
+    def test_exhausted_escalation_chain_requires_supervisor(self):
+        result = {
+            "structured_result": {
+                "reached_person": "no",
+                "understood_issue": "unknown",
+                "ownership": "unknown",
+                "eta_or_blocker": "No answer",
+                "escalation_required": True,
+            }
+        }
+        self.assertEqual(_handover_disposition(result, chain_exhausted=True), "needs_supervisor")
 
     def test_result_schema_requires_judge_visible_outcomes(self):
         required = set(RESULT_SCHEMA["required"])
