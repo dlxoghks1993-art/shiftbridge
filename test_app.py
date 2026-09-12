@@ -1,6 +1,6 @@
 import unittest
 
-from app import Incident, RESULT_SCHEMA, build_call_task
+from app import Incident, RESULT_SCHEMA, _needs_escalation, build_call_task
 
 
 class ShiftBridgeTests(unittest.TestCase):
@@ -14,12 +14,14 @@ class ShiftBridgeTests(unittest.TestCase):
             "next_action": "Inspect root cause and approve restart",
             "deadline": "06:30 local time",
             "recipient_phone": "+15551234567",
+            "escalation_phones": ["+15557654321"],
         }
 
     def test_incident_accepts_valid_payload(self):
         incident = Incident.from_dict(self.payload)
         self.assertEqual(incident.severity, "P1")
         self.assertEqual(incident.recipient_phone, "+15551234567")
+        self.assertEqual(incident.escalation_phones, ["+15557654321"])
 
     def test_incident_rejects_missing_field(self):
         payload = dict(self.payload)
@@ -39,12 +41,42 @@ class ShiftBridgeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "E.164"):
             Incident.from_dict(payload)
 
+    def test_incident_rejects_bad_escalation_phone(self):
+        payload = dict(self.payload)
+        payload["escalation_phones"] = ["01099999999"]
+        with self.assertRaisesRegex(ValueError, "E.164"):
+            Incident.from_dict(payload)
+
     def test_call_task_contains_guardrails_and_operational_facts(self):
         task = build_call_task(Incident.from_dict(self.payload))
         self.assertIn("Temperature excursion detected", task)
         self.assertIn("accept ownership", task)
         self.assertIn("Do not invent facts or commitments", task)
         self.assertIn("escalation_required=true", task)
+
+    def test_closed_handoff_does_not_escalate(self):
+        result = {
+            "structured_result": {
+                "reached_person": "yes",
+                "understood_issue": "yes",
+                "ownership": "accepted",
+                "eta_or_blocker": "20 minutes",
+                "escalation_required": False,
+            }
+        }
+        self.assertFalse(_needs_escalation(result))
+
+    def test_declined_ownership_escalates(self):
+        result = {
+            "structured_result": {
+                "reached_person": "yes",
+                "understood_issue": "yes",
+                "ownership": "declined",
+                "eta_or_blocker": "Not responsible for this line",
+                "escalation_required": True,
+            }
+        }
+        self.assertTrue(_needs_escalation(result))
 
     def test_result_schema_requires_judge_visible_outcomes(self):
         required = set(RESULT_SCHEMA["required"])
