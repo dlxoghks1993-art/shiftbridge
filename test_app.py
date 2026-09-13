@@ -4,7 +4,9 @@ from types import SimpleNamespace
 from app import (
     Incident,
     RESULT_SCHEMA,
+    _call_once,
     _handover_disposition,
+    _idempotency_key,
     _needs_escalation,
     _read_call_field,
     build_call_task,
@@ -69,6 +71,39 @@ class ShiftBridgeTests(unittest.TestCase):
         self.assertEqual(_read_call_field(response, "status"), "completed")
         self.assertEqual(_read_call_field(response, "structured_result"), {"ownership": "accepted"})
         self.assertIsNone(_read_call_field(response, "missing"))
+
+    def test_idempotency_key_is_stable_and_target_specific(self):
+        incident = Incident.from_dict(self.payload)
+        same = Incident.from_dict(dict(self.payload))
+        changed = Incident.from_dict({**self.payload, "recipient_phone": "+15550000000"})
+        self.assertEqual(_idempotency_key(incident), _idempotency_key(same))
+        self.assertNotEqual(_idempotency_key(incident), _idempotency_key(changed))
+        self.assertTrue(_idempotency_key(incident).startswith("shiftbridge-"))
+
+    def test_call_once_passes_explicit_recipient_and_idempotency_key(self):
+        captured = {}
+
+        class FakeCalls:
+            def create_and_wait(self, **kwargs):
+                captured.update(kwargs)
+                return {
+                    "status": "completed",
+                    "structured_result": {
+                        "reached_person": "yes",
+                        "understood_issue": "yes",
+                        "ownership": "accepted",
+                        "eta_or_blocker": "20 minutes",
+                        "escalation_required": False,
+                    },
+                }
+
+        fake_client = SimpleNamespace(calls=FakeCalls())
+        incident = Incident.from_dict(self.payload)
+        result = _call_once(fake_client, incident)
+        self.assertEqual(captured["recipient"], {"phone": "+15551234567"})
+        self.assertEqual(captured["idempotency_key"], _idempotency_key(incident))
+        self.assertEqual(captured["result_schema"], RESULT_SCHEMA)
+        self.assertEqual(result["phone"], "+15551234567")
 
     def test_closed_handoff_does_not_escalate(self):
         result = {
