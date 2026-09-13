@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from dataclasses import asdict, dataclass, replace
@@ -113,8 +114,30 @@ def _read_call_field(call: Any, name: str, default: Any = None) -> Any:
     return getattr(call, name, default)
 
 
+def _idempotency_key(i: Incident) -> str:
+    """Create a stable key so retried host workflows do not place duplicate real calls."""
+    material = "|".join(
+        [
+            i.site,
+            i.line,
+            i.severity.upper(),
+            i.issue,
+            i.next_action,
+            i.deadline,
+            i.recipient_phone,
+        ]
+    )
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+    return f"shiftbridge-{digest}"
+
+
 def _call_once(client: CalleClient, i: Incident) -> dict[str, Any]:
-    call = client.calls.create_and_wait(task=build_call_task(i), result_schema=RESULT_SCHEMA)
+    call = client.calls.create_and_wait(
+        task=build_call_task(i),
+        recipient={"phone": i.recipient_phone},
+        result_schema=RESULT_SCHEMA,
+        idempotency_key=_idempotency_key(i),
+    )
     return {
         "phone": i.recipient_phone,
         "status": _read_call_field(call, "status"),
