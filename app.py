@@ -67,18 +67,27 @@ def build_call_task(i: Incident) -> str:
         "At the start of the call, clearly identify yourself as an automated ShiftBridge assistant. "
         f"Report a {i.severity.upper()} issue at site {i.site}, line {i.line}: {i.issue}. "
         f"Action already taken: {i.action_taken}. Required next action: {i.next_action}. Deadline: {i.deadline}. "
-        "Verify that the responsible person understands the issue, ask whether they accept ownership, "
-        "capture their ETA or blocker, and determine whether a human supervisor needs escalation. "
-        "Do not invent facts or commitments. Do not claim the incident is resolved unless the called person "
-        "explicitly accepts ownership. If the person cannot be reached, does not understand the issue, "
-        "or declines ownership, mark escalation_required=true."
+        "Ask the recipient to briefly restate the unresolved issue or next action in their own words so the handover "
+        "has transcript-backed evidence of understanding. Then ask whether they explicitly accept ownership and, if "
+        "they do, capture the exact words showing acceptance plus their ETA. If they decline, capture the blocker. "
+        "Do not invent facts, quotes, or commitments. Do not claim the incident is resolved unless the called person "
+        "explicitly accepts ownership. If the person cannot be reached, does not demonstrate understanding, does not "
+        "explicitly accept ownership, or the transcript does not contain supporting words, mark escalation_required=true."
     )
 
 
 RESULT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["reached_person", "understood_issue", "ownership", "eta_or_blocker", "escalation_required"],
+    "required": [
+        "reached_person",
+        "understood_issue",
+        "acknowledgement_quote",
+        "ownership",
+        "ownership_quote",
+        "eta_or_blocker",
+        "escalation_required",
+    ],
     "properties": {
         "reached_person": {
             "type": "string",
@@ -90,10 +99,18 @@ RESULT_SCHEMA: dict[str, Any] = {
             "enum": ["yes", "no", "unknown"],
             "description": "Whether the called person explicitly demonstrated understanding of the incident.",
         },
+        "acknowledgement_quote": {
+            "type": "string",
+            "description": "Exact short words spoken by the recipient that demonstrate understanding; empty if unsupported.",
+        },
         "ownership": {
             "type": "string",
             "enum": ["accepted", "declined", "unknown"],
             "description": "Whether the called person explicitly accepted responsibility for the next action.",
+        },
+        "ownership_quote": {
+            "type": "string",
+            "description": "Exact short words spoken by the recipient that support accepted ownership; empty if unsupported.",
         },
         "eta_or_blocker": {
             "type": "string",
@@ -148,6 +165,10 @@ def _call_once(client: CalleClient, i: Incident) -> dict[str, Any]:
     }
 
 
+def _has_quote(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
 def _needs_escalation(result: dict[str, Any]) -> bool:
     structured = result.get("structured_result") or {}
     if structured.get("escalation_required") is True:
@@ -155,7 +176,9 @@ def _needs_escalation(result: dict[str, Any]) -> bool:
     return not (
         structured.get("reached_person") == "yes"
         and structured.get("understood_issue") == "yes"
+        and _has_quote(structured.get("acknowledgement_quote"))
         and structured.get("ownership") == "accepted"
+        and _has_quote(structured.get("ownership_quote"))
     )
 
 
@@ -165,7 +188,9 @@ def _handover_disposition(result: dict[str, Any], *, chain_exhausted: bool = Fal
     if (
         structured.get("reached_person") == "yes"
         and structured.get("understood_issue") == "yes"
+        and _has_quote(structured.get("acknowledgement_quote"))
         and structured.get("ownership") == "accepted"
+        and _has_quote(structured.get("ownership_quote"))
         and structured.get("escalation_required") is not True
     ):
         return "accepted"
