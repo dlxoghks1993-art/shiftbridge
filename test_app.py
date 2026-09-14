@@ -27,6 +27,19 @@ class ShiftBridgeTests(unittest.TestCase):
             "escalation_phones": ["+15557654321"],
         }
 
+    def accepted_result(self):
+        return {
+            "structured_result": {
+                "reached_person": "yes",
+                "understood_issue": "yes",
+                "acknowledgement_quote": "Line 2 is stopped and the isolated batch still needs root-cause inspection.",
+                "ownership": "accepted",
+                "ownership_quote": "I'll own the inspection and update by 06:30.",
+                "eta_or_blocker": "By 06:30",
+                "escalation_required": False,
+            }
+        }
+
     def test_incident_accepts_valid_payload(self):
         incident = Incident.from_dict(self.payload)
         self.assertEqual(incident.severity, "P1")
@@ -60,9 +73,10 @@ class ShiftBridgeTests(unittest.TestCase):
     def test_call_task_contains_guardrails_and_operational_facts(self):
         task = build_call_task(Incident.from_dict(self.payload))
         self.assertIn("Temperature excursion detected", task)
-        self.assertIn("accept ownership", task)
+        self.assertIn("explicitly accept ownership", task)
         self.assertIn("automated ShiftBridge assistant", task)
-        self.assertIn("Do not invent facts or commitments", task)
+        self.assertIn("Do not invent facts, quotes, or commitments", task)
+        self.assertIn("transcript-backed evidence", task)
         self.assertIn("escalation_required=true", task)
 
     def test_call_field_supports_mapping_and_sdk_object_shapes(self):
@@ -88,15 +102,10 @@ class ShiftBridgeTests(unittest.TestCase):
                 captured.update(kwargs)
                 return {
                     "status": "completed",
-                    "structured_result": {
-                        "reached_person": "yes",
-                        "understood_issue": "yes",
-                        "ownership": "accepted",
-                        "eta_or_blocker": "20 minutes",
-                        "escalation_required": False,
-                    },
+                    "structured_result": self_result,
                 }
 
+        self_result = self.accepted_result()["structured_result"]
         fake_client = SimpleNamespace(calls=FakeCalls())
         incident = Incident.from_dict(self.payload)
         result = _call_once(fake_client, incident)
@@ -106,24 +115,25 @@ class ShiftBridgeTests(unittest.TestCase):
         self.assertEqual(result["phone"], "+15551234567")
 
     def test_closed_handoff_does_not_escalate(self):
-        result = {
-            "structured_result": {
-                "reached_person": "yes",
-                "understood_issue": "yes",
-                "ownership": "accepted",
-                "eta_or_blocker": "20 minutes",
-                "escalation_required": False,
-            }
-        }
+        result = self.accepted_result()
         self.assertFalse(_needs_escalation(result))
         self.assertEqual(_handover_disposition(result), "accepted")
+
+    def test_accepted_label_without_quotes_fails_closed(self):
+        result = self.accepted_result()
+        result["structured_result"]["acknowledgement_quote"] = ""
+        result["structured_result"]["ownership_quote"] = ""
+        self.assertTrue(_needs_escalation(result))
+        self.assertEqual(_handover_disposition(result), "blocked")
 
     def test_declined_ownership_escalates(self):
         result = {
             "structured_result": {
                 "reached_person": "yes",
                 "understood_issue": "yes",
+                "acknowledgement_quote": "I understand the line is stopped.",
                 "ownership": "declined",
+                "ownership_quote": "",
                 "eta_or_blocker": "Not responsible for this line",
                 "escalation_required": True,
             }
@@ -136,7 +146,9 @@ class ShiftBridgeTests(unittest.TestCase):
             "structured_result": {
                 "reached_person": "no",
                 "understood_issue": "unknown",
+                "acknowledgement_quote": "",
                 "ownership": "unknown",
+                "ownership_quote": "",
                 "eta_or_blocker": "No answer",
                 "escalation_required": True,
             }
@@ -148,7 +160,9 @@ class ShiftBridgeTests(unittest.TestCase):
             "structured_result": {
                 "reached_person": "no",
                 "understood_issue": "unknown",
+                "acknowledgement_quote": "",
                 "ownership": "unknown",
+                "ownership_quote": "",
                 "eta_or_blocker": "No answer",
                 "escalation_required": True,
             }
@@ -163,7 +177,9 @@ class ShiftBridgeTests(unittest.TestCase):
             {
                 "reached_person",
                 "understood_issue",
+                "acknowledgement_quote",
                 "ownership",
+                "ownership_quote",
                 "eta_or_blocker",
                 "escalation_required",
             },
