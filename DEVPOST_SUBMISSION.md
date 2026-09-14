@@ -4,12 +4,12 @@
 ShiftBridge Handover Assurance
 
 ## Tagline
-A CALL-E-powered shift handover checkpoint that phones the incoming owner and returns structured proof that unfinished operational work was understood, accepted, blocked, or needs supervisor follow-up.
+A CALL-E-powered shift handover checkpoint that phones the incoming owner and returns transcript-backed proof that unfinished operational work was understood, accepted, blocked, or needs supervisor follow-up.
 
 ## Short description
 ShiftBridge solves a specific failure in 24/7 operations: critical unfinished work crosses a shift boundary, but the outgoing team cannot prove that the incoming owner actually absorbed the context before they leave.
 
-Instead of treating a ticket, logbook entry, or chat message as a completed handover, ShiftBridge uses CALL-E to place a real phone call to the known incoming owner. It relays only the supplied facts, confirms the unresolved condition and required next action, asks whether the recipient accepts ownership, captures an ETA or blocker, and returns a machine-readable handover disposition.
+Instead of treating a ticket, logbook entry, or chat message as a completed handover, ShiftBridge uses CALL-E to place a real phone call to the known incoming owner. It relays only the supplied facts, asks the recipient to restate the unresolved issue or next action in their own words, asks whether they explicitly accept ownership, captures an ETA or blocker, and returns a machine-readable handover disposition backed by short recipient quotes.
 
 The demo uses a manufacturing temperature excursion. The same pattern can be reused for facilities rounds, warehouse exceptions, field service, overnight operations, and other shift-based environments where continuity matters.
 
@@ -23,14 +23,15 @@ ShiftBridge was built around a simple question: **did the unfinished work actual
 2. Builds a bounded phone-call task from the unresolved issue, actions already taken, required next action, and deadline.
 3. Uses CALL-E to call the incoming owner.
 4. Identifies itself as an automated operational handover assistant.
-5. Confirms the recipient understands the unresolved condition and required next action.
-6. Asks whether they accept ownership and captures an ETA or blocker.
-7. Returns a structured disposition such as `accepted`, `blocked`, `unreached`, or `needs_supervisor` for downstream shift logs, CMMS, or production workflows.
+5. Asks the recipient to restate the unresolved condition or next action in their own words.
+6. Asks whether they explicitly accept ownership and captures an ETA or blocker.
+7. Requires transcript-backed acknowledgement and ownership quotes before the workflow can mark the handover accepted.
+8. Returns a structured disposition such as `accepted`, `blocked`, `unreached`, or `needs_supervisor` for downstream shift logs, CMMS, or production workflows.
 
 ## How we built it
-The prototype is a small Python application around CALL-E. Handover context is supplied as JSON, converted into a tightly scoped call goal, and sent through the CALL-E execution layer. The application interprets the returned conversation evidence into operational fields: reached/not reached, understood/not understood, ownership accepted/declined, ETA or blocker, and escalation required/not required.
+The prototype is a small Python application around CALL-E. Handover context is supplied as JSON, converted into a tightly scoped call goal, and sent through the CALL-E execution layer. The application interprets the returned conversation evidence into operational fields: reached/not reached, understood/not understood, acknowledgement quote, ownership accepted/declined, ownership quote, ETA or blocker, and escalation required/not required.
 
-A dry-run path makes the exact call task inspectable before any real-world side effect occurs. API credentials remain in environment variables rather than source.
+The host workflow is intentionally fail-closed. Even if a model labels the call `accepted`, ShiftBridge will not close the handover unless the result also contains recipient words supporting both understanding and ownership. A dry-run path makes the exact call task inspectable before any real-world side effect occurs. API credentials remain in environment variables rather than source.
 
 ## Why this is not just another incident pager
 The CALL-E community already includes an `incident-escalation-call` workflow for waking an on-call engineer and walking an escalation ladder. ShiftBridge targets a different problem and deliberately avoids duplicating that contribution.
@@ -38,26 +39,29 @@ The CALL-E community already includes an `incident-escalation-call` workflow for
 - It starts with an **outgoing shift's unfinished work**, not a monitoring alert.
 - It calls the **known incoming owner**, not an on-call rotation.
 - It carries **actions already taken, required next action, and deadline** so context survives the shift boundary.
+- It asks for a **read-back and explicit ownership evidence**, not merely acknowledgement of an alert.
 - Its primary result is a **handover disposition** suitable for a shift log or operations system.
 - Supervisor escalation is a failure path, not the product's main loop.
 
 ## Challenges
-The key design challenge was using a voice agent without turning it into the operational decision-maker. ShiftBridge does not decide whether equipment is safe, restart machinery, invent incident details, or create commitments on behalf of the recipient. Its job is narrower: communicate supplied facts, collect the human response, and flag when another authorized human needs to be involved.
+The key design challenge was using a voice agent without turning it into the operational decision-maker. ShiftBridge does not decide whether equipment is safe, restart machinery, invent incident details, or create commitments on behalf of the recipient. Its job is narrower: communicate supplied facts, collect the human response, preserve the recipient's own words as evidence, and flag when another authorized human needs to be involved.
 
-A second challenge was differentiating a shift-handover product from generic incident escalation. The design therefore centers on continuity-of-work fields and a known incoming owner instead of an on-call ladder.
+A second challenge was differentiating a shift-handover product from generic incident escalation. The design therefore centers on continuity-of-work fields, a known incoming owner, and evidence of successful knowledge transfer instead of an on-call ladder.
 
 ## Accomplishments
 - CALL-E is part of the core state transition rather than a cosmetic integration.
 - The workflow focuses on a specific real-world phone-work problem: shift-to-shift continuity.
+- A handover cannot close from a bare classifier label; acceptance requires transcript-backed understanding and ownership evidence.
 - The demo includes both a successful handover and a blocker/escalation path.
 - The result is structured for downstream automation instead of being only a transcript or summary.
 - The application has a preview/dry-run path so the operator can inspect the call before a real phone call is placed.
+- Stable idempotency keys reduce the risk of duplicate real calls when a host workflow retries.
 
 ## What we learned
-The valuable software layer around a phone call is not merely the transcript. In shift work, the important state transition is whether the incoming person understood the unfinished work, accepted the next action, and surfaced a blocker while the outgoing team could still respond. Treating that transition as a structured workflow step turns a phone call into auditable operational continuity.
+The valuable software layer around a phone call is not merely the transcript. In shift work, the important state transition is whether the incoming person understood the unfinished work, accepted the next action, and surfaced a blocker while the outgoing team could still respond. Requiring the recipient's own words as evidence makes that state transition more auditable and keeps downstream automation from over-trusting an unsupported model classification.
 
 ## What's next
-A production version would add shift-roster integration, structured read-back of critical fields, CMMS/ticket write-back, deadline-aware supervisor escalation, audit timelines, and organization-specific handover policies. The escalation layer would remain downstream of the core handover checkpoint rather than replacing it.
+A production version would add shift-roster integration, CMMS/ticket write-back, deadline-aware supervisor escalation, audit timelines, and organization-specific handover policies. The escalation layer would remain downstream of the core handover checkpoint rather than replacing it.
 
 ## Required submission checklist
 - [ ] Join the CALL-E hackathon on Devpost.
@@ -65,8 +69,9 @@ A production version would add shift-roster integration, structured read-back of
 - [ ] Run at least one real CALL-E demo call successfully.
 - [ ] Prepare the contribution under the correct area of `CALLE-AI/awesome-phone-call-agents` and open the required pull request.
 - [ ] Put that pull-request URL in the Devpost submission.
-- [ ] Record a public YouTube or Vimeo demo of about three minutes.
+- [ ] Record a public YouTube or Vimeo demo under three minutes.
 - [ ] Ensure the video visibly shows CALL-E being called at runtime and the returned structured result.
+- [ ] Show the transcript-backed acknowledgement/ownership evidence or an honest failed-closed path.
 - [ ] Provide the email associated with the CALL-E account.
 - [ ] Complete every required Devpost submission field.
 - [ ] Submit before September 14, 2026 at 11:45 PM SGT.
