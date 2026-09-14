@@ -2,6 +2,14 @@
 
 Use this only after a CALL-E account/API key is available. The goal is to collect proof that the project actually calls CALL-E at runtime and to avoid spending scarce free calls on avoidable mistakes.
 
+## 0. Region check before any live demo
+
+CALL-E's current official supported-region table does **not** include South Korea (`+82`). Do not assume a Korean mobile number can be used for the live demo.
+
+For a real outbound demo, use only a phone number that the entrant controls or has explicit permission to call **and** whose country code is currently supported by CALL-E. Re-check the provider's supported-region table immediately before testing because provider coverage can change.
+
+If the only authorized number available is `+82`, do not fabricate a successful call or edit screenshots/transcripts to imply one happened. Keep the application functional for supported numbers, show the dry-run honestly, and record the provider limitation as reproducible product feedback. A real supported-region call remains the strongest evidence for the hackathon's technical-implementation criterion.
+
 ## 1. Preflight without placing a call
 
 ```bash
@@ -78,7 +86,8 @@ Use:
 
 Final check before submitting:
 
-- CALL-E is actually called at runtime
+- CALL-E is actually called at runtime when an authorized supported-region recipient is available
+- any unsupported-region limitation is described accurately rather than presented as a successful call
 - project installs and runs as shown
 - public repository is accessible
 - demo video is public and under the event time limit
@@ -89,3 +98,5 @@ Final check before submitting:
 ## 8. Feedback-prize notes
 
 During live testing, record concrete CALL-E feedback separately: SDK/API friction, documentation gaps, result-schema behavior, call latency, dashboard UX, or integration ideas. Actionable reproducible observations are more useful than general praise and can be reused in the hackathon feedback submission.
+
+For a South Korea entrant, the absence of `+82` in the supported-region table is itself a concrete, reproducible product-coverage limitation worth documenting accurately in feedback. The feedback submission remains separate from the main project submission and should not claim that an unsupported live call succeeded.
