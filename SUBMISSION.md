@@ -1,54 +1,47 @@
-# ShiftBridge Call Escalator — submission draft
+# ShiftBridge — CALL-E Submission Draft
 
 ## One-line pitch
-ShiftBridge turns a critical shift handover into a real phone escalation and returns structured proof that the next responsible human understood the incident and accepted ownership.
+ShiftBridge is a phone-native shift-handover agent that proves unfinished operational work was actually understood and accepted by the incoming owner before the outgoing shift disappears.
 
 ## Problem
-Operational handovers often fail at the final mile. A note, chat message, or ticket can exist without proving that the person who must act actually received it, understood it, and accepted responsibility. In factories, facilities, logistics, field service, and overnight IT operations, that gap can turn a manageable incident into downtime or a missed escalation.
+Factories, warehouses, facilities, and field-service teams transfer unresolved work across shift boundaries every day. Tickets and chat messages prove information was sent, but they do not prove the next owner understood the unresolved condition, accepted responsibility, or surfaced a blocker while the outgoing operator was still available.
 
-## Solution
-ShiftBridge receives a structured incident and uses CALL-E to call the responsible person. The agent relays only the supplied facts, confirms understanding, asks whether the person accepts ownership, captures an ETA or blocker, and returns a structured escalation result with conversation evidence.
+## Why CALL-E
+This workflow needs a live conversation. ShiftBridge uses CALL-E to reach the known incoming owner, disclose that it is an automated handover assistant, relay only the supplied incident facts, request a read-back, obtain explicit ownership, and capture an ETA or blocker. The useful artifact is not merely a notification: it is transcript-backed evidence that responsibility crossed the shift boundary.
 
-## Why CALL-E matters
-The phone call is the product's execution layer, not a demo add-on. Without CALL-E, ShiftBridge can only send another passive notification. With CALL-E, it actively closes the handoff loop with a human conversation and machine-readable outcome.
+## Demo
+**Scenario:** Packaging Line 2 has a temperature excursion shortly before shift change. The outgoing operator has stopped the line and isolated the affected batch, but investigation is unfinished.
+
+1. The host sends ShiftBridge a structured handover packet with site, line, severity, unresolved issue, actions already taken, required next action, deadline, and incoming-owner phone number.
+2. ShiftBridge calls the incoming supervisor through CALL-E.
+3. The agent identifies itself as automated and gives the bounded handover facts.
+4. It asks the supervisor to restate the issue or next action in their own words.
+5. It asks for explicit ownership and an ETA, or records the blocker.
+6. The host accepts the handover only when the structured result contains both understanding and ownership backed by non-empty recipient quotes.
+7. If the recipient is unreachable, does not demonstrate understanding, or declines ownership, ShiftBridge proceeds through the configured escalation chain and ultimately returns `needs_supervisor` if nobody safely accepts the handover.
 
 ## What makes it different
-Most incident tools optimize the message. ShiftBridge optimizes proof of transfer of responsibility. Its core output is not "notification sent" but a verified handoff state: reached, understood, ownership accepted or declined, ETA/blocker captured, and escalation required or not.
+This is not an incident pager. Incident pagers primarily alert or locate an on-call responder. ShiftBridge begins at a specific operational transition: an outgoing shift has unfinished work and a known incoming owner. It carries forward actions already taken, the required next action, and the deadline, then verifies continuity with read-back plus explicit ownership evidence.
 
-## Demo scenario
-A night-shift operator discovers a P1 temperature excursion on Packaging Line 2. The outgoing operator has already stopped the line and isolated the affected batch. ShiftBridge calls the incoming supervisor, explains the incident and required next action, confirms understanding, asks the supervisor to accept ownership, records the ETA/blocker, and returns whether further human escalation is required.
+## Safety and reliability
+- The agent may relay only facts supplied in the handover packet.
+- It may not decide equipment safety, restart machinery, approve maintenance, or make emergency decisions.
+- It must disclose that it is automated.
+- A model-generated `accepted` label is insufficient by itself; acknowledgement and ownership require transcript-backed quotes.
+- Failed or ambiguous handovers fail closed into escalation rather than being marked complete.
+- Stable idempotency keys reduce duplicate real calls when host workflows retry.
 
-### 60-second demo flow
-1. Show the incident JSON and the five operational facts supplied to the agent.
-2. Run ShiftBridge and start the CALL-E phone call.
-3. The recipient acknowledges the incident and either accepts or declines ownership.
-4. Show CALL-E's structured result and evidence.
-5. Highlight `escalation_required`: the system has converted a phone conversation into an actionable machine state.
+## Reusability
+Manufacturing is the demo, but the same handover contract applies to facilities rounds, warehouse exceptions, field-service continuity, overnight operations, security operations, and other staffed 24/7 workflows.
 
-### Failure-path demo
-A second run demonstrates the stronger value case: the recipient says they cannot take ownership or cannot meet the deadline. ShiftBridge must not invent a commitment; it returns `ownership=declined` or the blocker and sets `escalation_required=true`.
+## Suggested 90-second demo recording
+**0–15s:** Show the JSON handover packet and explain the gap: “a ticket proves this was written, not that the next shift accepted it.”
 
-## Structured output
-- `reached_person`
-- `understood_issue`
-- `ownership`
-- `eta_or_blocker`
-- `escalation_required`
-- CALL-E completion confidence/evidence
+**15–55s:** Run ShiftBridge and show the CALL-E conversation: automated disclosure → bounded facts → read-back request → explicit ownership → ETA/blocker.
 
-## Judging highlights
-- **Real-world usefulness:** closes a common last-mile gap in operational handoffs.
-- **CALL-E-native:** the phone agent is required for the product to work; it is not an ornamental integration.
-- **Clear agentic loop:** structured incident in → human phone interaction → structured verified outcome out.
-- **Measurable result:** the demo ends with machine-readable evidence rather than a subjective conversation summary.
-- **Expandable architecture:** escalation trees can call the next authorized person when the first handoff fails.
-- **Safety-conscious:** the agent reports supplied facts and human responses; it does not make safety-critical decisions itself.
+**55–75s:** Show the structured result and the host-side `accepted` disposition only when transcript-backed acknowledgement and ownership are present.
 
-## Safety
-ShiftBridge does not make safety-critical decisions or invent incident facts. It relays supplied information, collects acknowledgement and ownership status, and explicitly flags cases that require a human supervisor.
+**75–90s:** Show the failure path: unreachable/declined/unsupported response triggers escalation and eventually `needs_supervisor` instead of a false success.
 
-## Future extension
-A production version would add policy-driven escalation trees: if the first responsible person declines, cannot be reached, or reports a blocker beyond the incident deadline, ShiftBridge would call the next authorized contact while maintaining an auditable incident timeline. Integrations could then write the verified result back to CMMS, ticketing, or shift-log systems.
-
-## Submission copy
-**ShiftBridge Call Escalator** is a CALL-E-powered operational handover agent. Instead of stopping at a Slack message, ticket, or alert, ShiftBridge calls the responsible human, relays only the supplied incident facts, verifies understanding, asks them to accept ownership, captures an ETA or blocker, and returns a structured escalation decision with evidence. The demo focuses on a P1 manufacturing handover, but the same pattern applies to facilities, logistics, field service, and overnight IT operations. CALL-E is the execution layer that makes the product possible: ShiftBridge's value is proving that responsibility actually crossed from one human shift to the next.
+## Submission description
+ShiftBridge turns operational shift change into a verifiable phone handover. When unfinished work must cross from an outgoing shift to an incoming owner, it uses CALL-E to relay the exact supplied context, request a read-back, capture explicit ownership and ETA/blocker, and return structured evidence to the host workflow. The handover fails closed: without transcript-backed understanding and ownership, ShiftBridge escalates rather than pretending responsibility transferred. The result is a reusable phone-native continuity layer for factories, facilities, warehouses, field service, and other 24/7 operations.
